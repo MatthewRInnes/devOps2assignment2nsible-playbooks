@@ -50,17 +50,19 @@ pipeline {
         // If your Jenkins machine already has Ansible, this will be quick / cached.
         sh '''
           set -e
-          # Ensure pip exists (some Ubuntu images ship Python without pip)
+          # Ensure pip exists without relying on sudo (Jenkins often has no TTY/sudo password).
           if ! python3 -m pip --version >/dev/null 2>&1; then
-            if command -v sudo >/dev/null 2>&1; then
-              sudo apt-get update -y
-              sudo apt-get install -y python3-pip
-            else
-              python3 -m ensurepip --upgrade || true
-            fi
+            echo "pip not found; attempting to install pip via ensurepip"
+            # First try the standard ensurepip install.
+            python3 -m ensurepip --upgrade 2>/dev/null || \
+              python3 -m ensurepip --user --upgrade
           fi
 
           python3 -m pip --version
+
+          # Make sure user-local bin is on PATH (for ansible-galaxy in this pipeline).
+          export PATH="$HOME/.local/bin:$PATH"
+
           python3 -m pip install --user -q ansible boto3 botocore
           ~/.local/bin/ansible-galaxy collection install -q amazon.aws community.general
         '''
