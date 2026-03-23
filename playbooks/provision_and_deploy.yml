@@ -84,9 +84,8 @@
         network:
           subnet_id: "{{ subnet_id }}"
           assign_public_ip: true
-        # Use security_group_ids (AWS module expects IDs or names depending on version).
-        security_group_ids:
-          - "{{ security_group_id }}"
+        # This amazon.aws.ec2_instance module expects `security_group` (singular).
+        security_group: "{{ security_group_id }}"
         user_data: "{{ user_data_script }}"
         wait: false
         state: present
