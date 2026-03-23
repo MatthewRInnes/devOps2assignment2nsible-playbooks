@@ -93,9 +93,20 @@
           Name: "cd-fastapi-{{ image_full | regex_replace(':','-') }}"
       register: ec2
 
-    - name: Determine the new instance public IP
+    - name: Look up the new instance and fetch its public IP
+      # The exact return structure of amazon.aws.ec2_instance varies by Ansible version.
+      # Using ec2_instance_info is more reliable.
+      amazon.aws.ec2_instance_info:
+        region: "{{ aws_region }}"
+        filters:
+          "tag:Name": "cd-fastapi-{{ image_full | regex_replace(':','-') }}"
+      register: instance_info
+
+    - name: Determine the new instance public IP from instance_info
       ansible.builtin.set_fact:
-        new_public_ip: "{{ (ec2.instances[0].public_ip_address | default(ec2.instances[0].public_ip)) }}"
+        new_public_ip: >-
+          {{ (instance_info.instances[0].public_ip_address
+              | default(instance_info.instances[0].public_ip)) }}
 
     - name: Wait for the application to respond on HTTP port
       ansible.builtin.wait_for:
