@@ -17,9 +17,6 @@ pipeline {
     // Docker image repository (must be lowercase)
     DOCKERHUB_IMAGE_REPO = 'fyooie11/devopsassignment2fastapi-dockerfile'
 
-    // Where the Ansible playbook expects to find the SSH private key file (we create it at runtime)
-    ANSIBLE_SSH_KEY_PATH = "${env.WORKSPACE}/.ssh_key.pem"
-
     // Use a virtual environment so pip/Ansible installs work without sudo and without PEP 668 errors.
     VENV_PATH = "${env.WORKSPACE}/.venv"
 
@@ -32,8 +29,6 @@ pipeline {
     SUBNET_ID = 'subnet-064827d24a5f74f7e' // from your EC2 instance details
     // Still required: the Security Group ID in AWS (format: sg-xxxxxxxx)
     SECURITY_GROUP_ID = 'sg-0c60a58220c522730' // security group from your EC2 instance details
-    KEY_NAME = 'devops2' // key pair name shown on your Jenkins/EC2 instance
-    SSH_USER = 'ubuntu'
 
     // Deployment options
     CONTAINER_NAME = 'fastapi-app'
@@ -68,28 +63,6 @@ pipeline {
       }
     }
 
-    stage('Prepare SSH key for Ansible') {
-      steps {
-        // This expects you to create a Jenkins credential containing your EC2 SSH private key.
-        // Create a credential of kind: "SSH Username with private key"
-        // credentialsId must be: ec2-ssh-key
-        withCredentials([
-          sshUserPrivateKey(
-            credentialsId: 'ec2-ssh-key',
-            keyFileVariable: 'SSH_KEY_FILE',
-            usernameVariable: 'SSH_USERNAME'
-          )
-        ]) {
-          sh '''
-            set -e
-            # Copy the key to a predictable path for Ansible
-            cp "$SSH_KEY_FILE" "$ANSIBLE_SSH_KEY_PATH"
-            chmod 600 "$ANSIBLE_SSH_KEY_PATH"
-          '''
-        }
-      }
-    }
-
     stage('Provision EC2 + Deploy Docker image') {
       steps {
         // Docker Hub credentials for docker login
@@ -115,7 +88,7 @@ pipeline {
             "$VENV_PATH/bin/ansible-playbook" \\
               -i localhost, -c local \\
               playbooks/provision_and_deploy.yml \\
-              --extra-vars "image_full=$IMAGE_FULL aws_region=$AWS_REGION instance_type=$INSTANCE_TYPE ami_id=$AMI_ID subnet_id=$SUBNET_ID security_group_id=$SECURITY_GROUP_ID key_name=$KEY_NAME ssh_user=$SSH_USER ansible_ssh_private_key_file=$ANSIBLE_SSH_KEY_PATH dockerhub_user=$DOCKERHUB_USER dockerhub_password=$DOCKERHUB_PASS container_name=$CONTAINER_NAME host_port=$HOST_PORT container_port=$CONTAINER_PORT"
+              --extra-vars "image_full=$IMAGE_FULL aws_region=$AWS_REGION instance_type=$INSTANCE_TYPE ami_id=$AMI_ID subnet_id=$SUBNET_ID security_group_id=$SECURITY_GROUP_ID dockerhub_user=$DOCKERHUB_USER dockerhub_password=$DOCKERHUB_PASS container_name=$CONTAINER_NAME host_port=$HOST_PORT container_port=$CONTAINER_PORT"
           '''
         }
       }

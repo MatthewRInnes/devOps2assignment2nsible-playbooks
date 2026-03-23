@@ -20,8 +20,6 @@
     ami_id: ''
     subnet_id: ''
     security_group_id: ''
-    key_name: ''
-    ssh_user: 'ubuntu'
 
     # Docker credentials for docker login on the EC2 instance
     dockerhub_user: ''
@@ -32,9 +30,6 @@
     host_port: '80'
     container_port: '80'
 
-    # Provided by Jenkins (path to SSH key file on the controller)
-    ansible_ssh_private_key_file: ''
-
   tasks:
     - name: Validate that required variables are provided
       ansible.builtin.assert:
@@ -43,103 +38,74 @@
           - aws_region | length > 0
           - subnet_id | length > 0
           - security_group_id | length > 0
-          - key_name | length > 0
           - dockerhub_user | length > 0
           - dockerhub_password | length > 0
-          - ansible_ssh_private_key_file | length > 0
         fail_msg: "One or more required extra-vars were not provided. Edit Jenkinsfile or pass correct --extra-vars."
 
-    - name: Provision a new EC2 instance
+    - name: Build user_data script to install Docker, run container, and serve on port 80
+      # We use user_data so Ansible does NOT need an SSH key.
+      ansible.builtin.set_fact:
+        user_data_script: |
+          #!/bin/bash
+          set -e
+
+          export DEBIAN_FRONTEND=noninteractive
+
+          # Install docker + curl for basic checks
+          apt-get update -y
+          apt-get install -y docker.io curl
+
+          systemctl enable docker
+          systemctl start docker
+
+          # Login to Docker Hub (credentials are provided by Jenkins at runtime)
+          echo "{{ dockerhub_password }}" | docker login -u "{{ dockerhub_user }}" --password-stdin
+
+          # Pull and run the selected image
+          docker pull "{{ image_full }}"
+
+          # Stop any old container with same name (idempotent)
+          docker rm -f "{{ container_name }}" || true
+
+          # Run on host_port:container_port (per assignment requirement, port 80)
+          docker run -d --name "{{ container_name }}" -p {{ host_port }}:{{ container_port }} "{{ image_full }}"
+
+          # Give the app a moment to start
+          sleep 5
+      no_log: true
+
+    - name: Provision a new EC2 instance (using user_data to deploy app)
+      # no_log avoids printing Docker Hub password/user_data to logs.
+      no_log: true
       amazon.aws.ec2_instance:
         region: "{{ aws_region }}"
         instance_type: "{{ instance_type }}"
         image_id: "{{ ami_id }}"
-        key_name: "{{ key_name }}"
         network:
           subnet_id: "{{ subnet_id }}"
           assign_public_ip: true
         security_group: "{{ security_group_id }}"
+        user_data: "{{ user_data_script }}"
         wait: false
         state: present
         tags:
           Name: "cd-fastapi-{{ image_full | regex_replace(':','-') }}"
       register: ec2
 
-    - name: Wait for the instance to become reachable (port 22)
+    - name: Determine the new instance public IP
+      ansible.builtin.set_fact:
+        new_public_ip: "{{ (ec2.instances[0].public_ip_address | default(ec2.instances[0].public_ip)) }}"
+
+    - name: Wait for the application to respond on HTTP port
       ansible.builtin.wait_for:
-        host: "{{ ec2.instances[0].public_ip }}"
-        port: 22
-        timeout: 300
-        delay: 5
+        host: "{{ new_public_ip }}"
+        port: 80
+        timeout: 420
+        delay: 10
 
-    - name: Add the new instance to a temporary inventory group
-      ansible.builtin.add_host:
-        name: "new-ec2"
-        ansible_host: "{{ ec2.instances[0].public_ip }}"
-        ansible_user: "{{ ssh_user }}"
-        ansible_ssh_private_key_file: "{{ ansible_ssh_private_key_file }}"
-        groups: provisioned_ec2
-
-- name: Configure EC2 and deploy Docker container
-  hosts: provisioned_ec2
-  become: true
-  become_user: root
-  gather_facts: true
-
-  vars:
-    image_full: ''
-    dockerhub_user: ''
-    dockerhub_password: ''
-    container_name: ''
-    host_port: ''
-    container_port: ''
-
-  tasks:
-    - name: Update apt cache (Ubuntu/Debian)
-      ansible.builtin.apt:
-        update_cache: true
-
-    - name: Install Docker
-      ansible.builtin.apt:
-        name:
-          - docker.io
-        state: present
-
-    - name: Ensure Docker service is running
-      ansible.builtin.service:
-        name: docker
-        state: started
-        enabled: true
-
-    - name: Log in to Docker Hub (so docker pull works)
-      ansible.builtin.shell: |
-        echo "{{ dockerhub_password }}" | docker login -u "{{ dockerhub_user }}" --password-stdin
-      args:
-        executable: /bin/bash
-      changed_when: false
-
-    - name: Pull the selected Docker image
-      ansible.builtin.shell: |
-        docker pull "{{ image_full }}"
-      args:
-        executable: /bin/bash
-
-    - name: Stop and remove any existing container with the same name
-      ansible.builtin.shell: |
-        docker rm -f "{{ container_name }}" || true
-      args:
-        executable: /bin/bash
-      changed_when: false
-
-    - name: Run the container on port 80
-      ansible.builtin.shell: |
-        docker run -d --name "{{ container_name }}" -p {{ host_port }}:{{ container_port }} "{{ image_full }}"
-      args:
-        executable: /bin/bash
-
-    - name: Verify the application responds on HTTP port 80
+    - name: Verify the application responds with HTTP 200
       ansible.builtin.uri:
-        url: "http://127.0.0.1:{{ host_port }}/"
+        url: "http://{{ new_public_ip }}:{{ host_port }}/"
         return_content: false
         status_code: 200
 
