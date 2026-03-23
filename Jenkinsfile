@@ -50,6 +50,17 @@ pipeline {
         // If your Jenkins machine already has Ansible, this will be quick / cached.
         sh '''
           set -e
+          # Ensure pip exists (some Ubuntu images ship Python without pip)
+          if ! python3 -m pip --version >/dev/null 2>&1; then
+            if command -v sudo >/dev/null 2>&1; then
+              sudo apt-get update -y
+              sudo apt-get install -y python3-pip
+            else
+              python3 -m ensurepip --upgrade || true
+            fi
+          fi
+
+          python3 -m pip --version
           python3 -m pip install --user -q ansible boto3 botocore
           ~/.local/bin/ansible-galaxy collection install -q amazon.aws community.general
         '''
@@ -84,7 +95,9 @@ pipeline {
         // Expects you already created: dockerhub-credentials (username/password) or update the ID below.
         withCredentials([
           usernamePassword(
-            credentialsId: 'dockerhub-credentials',
+            // Use the credentialsId that exists in your Jenkins.
+            // (Your current Docker Hub credential ID is a UUID.)
+            credentialsId: 'd6898e21-9ec6-44cc-bef8-31166a0ffd5a',
             usernameVariable: 'DOCKERHUB_USER',
             passwordVariable: 'DOCKERHUB_PASS'
           )
