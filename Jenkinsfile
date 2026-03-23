@@ -62,7 +62,8 @@ pipeline {
 
           "$VENV_PATH/bin/pip" install -q --upgrade pip
           "$VENV_PATH/bin/pip" install -q ansible boto3 botocore
-          "$VENV_PATH/bin/ansible-galaxy" collection install -q amazon.aws community.general
+          # Some ansible-galaxy versions do not support `-q`, so we avoid it for compatibility.
+          "$VENV_PATH/bin/ansible-galaxy" collection install amazon.aws community.general
         '''
       }
     }
