@@ -75,8 +75,8 @@
       no_log: true
 
     - name: Provision a new EC2 instance (using user_data to deploy app)
-      # no_log avoids printing Docker Hub password/user_data to logs.
-      no_log: true
+      # Note: we intentionally do NOT hide this task output so we can see the real AWS error
+      # (e.g., missing credentials vs permissions vs network/VPC issues).
       amazon.aws.ec2_instance:
         region: "{{ aws_region }}"
         instance_type: "{{ instance_type }}"
