@@ -20,6 +20,9 @@ pipeline {
     // Where the Ansible playbook expects to find the SSH private key file (we create it at runtime)
     ANSIBLE_SSH_KEY_PATH = "${env.WORKSPACE}/.ssh_key.pem"
 
+    // Use a virtual environment so pip/Ansible installs work without sudo and without PEP 668 errors.
+    VENV_PATH = "${env.WORKSPACE}/.venv"
+
     // NOTE:
     // Update these AWS variables to match your environment, or pass them via Jenkins as extra-vars.
     AWS_REGION = 'us-east-1'
@@ -50,21 +53,14 @@ pipeline {
         // If your Jenkins machine already has Ansible, this will be quick / cached.
         sh '''
           set -e
-          # Ensure pip exists without relying on sudo (Jenkins often has no TTY/sudo password).
-          if ! python3 -m pip --version >/dev/null 2>&1; then
-            echo "pip not found; attempting to install pip via ensurepip"
-            # First try the standard ensurepip install.
-            python3 -m ensurepip --upgrade 2>/dev/null || \
-              python3 -m ensurepip --user --upgrade
+          # Create venv if it doesn't exist (avoids system-wide pip restrictions).
+          if [ ! -d "$VENV_PATH" ]; then
+            python3 -m venv "$VENV_PATH"
           fi
 
-          python3 -m pip --version
-
-          # Make sure user-local bin is on PATH (for ansible-galaxy in this pipeline).
-          export PATH="$HOME/.local/bin:$PATH"
-
-          python3 -m pip install --user -q ansible boto3 botocore
-          ~/.local/bin/ansible-galaxy collection install -q amazon.aws community.general
+          "$VENV_PATH/bin/pip" install -q --upgrade pip
+          "$VENV_PATH/bin/pip" install -q ansible boto3 botocore
+          "$VENV_PATH/bin/ansible-galaxy" collection install -q amazon.aws community.general
         '''
       }
     }
@@ -113,7 +109,7 @@ pipeline {
 
             # Run the Ansible playbook locally; it will provision EC2 and then configure the new instance.
             # We pass sensitive runtime values via --extra-vars.
-            ~/.local/bin/ansible-playbook \\
+            "$VENV_PATH/bin/ansible-playbook" \\
               -i localhost, -c local \\
               playbooks/provision_and_deploy.yml \\
               --extra-vars "image_full=$IMAGE_FULL aws_region=$AWS_REGION instance_type=$INSTANCE_TYPE ami_id=$AMI_ID subnet_id=$SUBNET_ID security_group_id=$SECURITY_GROUP_ID key_name=$KEY_NAME ssh_user=$SSH_USER ansible_ssh_private_key_file=$ANSIBLE_SSH_KEY_PATH dockerhub_user=$DOCKERHUB_USER dockerhub_password=$DOCKERHUB_PASS container_name=$CONTAINER_NAME host_port=$HOST_PORT container_port=$CONTAINER_PORT"
