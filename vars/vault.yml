@@ -1,0 +1,12 @@
+# Placeholder for Ansible Vault
+#
+# In the real submission, you should encrypt this file with:
+#   ansible-vault encrypt vars/vault.yml
+# and then ensure Jenkins passes the vault password during the CD run.
+#
+# For now, this file is NOT encrypted.
+# Fill in sensitive values only if needed, but prefer using Jenkins credentials and --extra-vars.
+
+dockerhub_user: "REPLACE_ME"
+dockerhub_password: "REPLACE_ME"
+

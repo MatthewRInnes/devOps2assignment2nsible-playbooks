@@ -1,0 +1,143 @@
+---
+# Playbook: provision_and_deploy.yml
+#
+# This playbook:
+# 1) Runs on the Jenkins controller (localhost) to provision a new EC2 instance
+# 2) Adds that instance to an in-memory inventory
+# 3) Runs a second play against the new instance to install Docker, pull the selected image tag, and run it on port 80
+# 4) Verifies the app responds over HTTP
+
+- name: Provision a new EC2 instance (runs on Jenkins controller)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    # These variables are passed from Jenkins --extra-vars
+    image_full: ''
+    aws_region: ''
+    instance_type: ''
+    ami_id: ''
+    subnet_id: ''
+    security_group_id: ''
+    key_name: ''
+    ssh_user: 'ubuntu'
+
+    # Docker credentials for docker login on the EC2 instance
+    dockerhub_user: ''
+    dockerhub_password: ''
+
+    # Container settings
+    container_name: 'fastapi-app'
+    host_port: '80'
+    container_port: '80'
+
+    # Provided by Jenkins (path to SSH key file on the controller)
+    ansible_ssh_private_key_file: ''
+
+  tasks:
+    - name: Validate that required variables are provided
+      ansible.builtin.assert:
+        that:
+          - image_full | length > 0
+          - aws_region | length > 0
+          - subnet_id | length > 0
+          - security_group_id | length > 0
+          - key_name | length > 0
+          - dockerhub_user | length > 0
+          - dockerhub_password | length > 0
+          - ansible_ssh_private_key_file | length > 0
+        fail_msg: "One or more required extra-vars were not provided. Edit Jenkinsfile or pass correct --extra-vars."
+
+    - name: Provision a new EC2 instance
+      amazon.aws.ec2_instance:
+        region: "{{ aws_region }}"
+        instance_type: "{{ instance_type }}"
+        image_id: "{{ ami_id }}"
+        key_name: "{{ key_name }}"
+        network:
+          subnet_id: "{{ subnet_id }}"
+          assign_public_ip: true
+        security_group: "{{ security_group_id }}"
+        wait: false
+        state: present
+        tags:
+          Name: "cd-fastapi-{{ image_full | regex_replace(':','-') }}"
+      register: ec2
+
+    - name: Wait for the instance to become reachable (port 22)
+      ansible.builtin.wait_for:
+        host: "{{ ec2.instances[0].public_ip }}"
+        port: 22
+        timeout: 300
+        delay: 5
+
+    - name: Add the new instance to a temporary inventory group
+      ansible.builtin.add_host:
+        name: "new-ec2"
+        ansible_host: "{{ ec2.instances[0].public_ip }}"
+        ansible_user: "{{ ssh_user }}"
+        ansible_ssh_private_key_file: "{{ ansible_ssh_private_key_file }}"
+        groups: provisioned_ec2
+
+- name: Configure EC2 and deploy Docker container
+  hosts: provisioned_ec2
+  gather_facts: true
+
+  vars:
+    image_full: ''
+    dockerhub_user: ''
+    dockerhub_password: ''
+    container_name: ''
+    host_port: ''
+    container_port: ''
+
+  tasks:
+    - name: Update apt cache (Ubuntu/Debian)
+      ansible.builtin.apt:
+        update_cache: true
+
+    - name: Install Docker
+      ansible.builtin.apt:
+        name:
+          - docker.io
+        state: present
+
+    - name: Ensure Docker service is running
+      ansible.builtin.service:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Log in to Docker Hub (so docker pull works)
+      ansible.builtin.shell: |
+        echo "{{ dockerhub_password }}" | docker login -u "{{ dockerhub_user }}" --password-stdin
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Pull the selected Docker image
+      ansible.builtin.shell: |
+        docker pull "{{ image_full }}"
+      args:
+        executable: /bin/bash
+
+    - name: Stop and remove any existing container with the same name
+      ansible.builtin.shell: |
+        docker rm -f "{{ container_name }}" || true
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Run the container on port 80
+      ansible.builtin.shell: |
+        docker run -d --name "{{ container_name }}" -p {{ host_port }}:{{ container_port }} "{{ image_full }}"
+      args:
+        executable: /bin/bash
+
+    - name: Verify the application responds on HTTP port 80
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ host_port }}/"
+        return_content: false
+        status_code: 200
+
