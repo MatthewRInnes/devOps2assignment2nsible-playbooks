@@ -27,10 +27,10 @@ pipeline {
     // Update these AWS variables to match your environment, or pass them via Jenkins as extra-vars.
     AWS_REGION = 'us-east-1'
     INSTANCE_TYPE = 't2.micro'
-    # From your EC2 instance details
+    // From your EC2 instance details
     AMI_ID = 'ami-0b6c6ebed2801a5cb' // Ubuntu Noble 24.04 (from your screenshot)
     SUBNET_ID = 'subnet-064827d24a5f74f7e' // from your EC2 instance details
-    # Still required: the Security Group ID in AWS (format: sg-xxxxxxxx)
+    // Still required: the Security Group ID in AWS (format: sg-xxxxxxxx)
     SECURITY_GROUP_ID = 'sg-0c60a58220c522730' // security group from your EC2 instance details
     KEY_NAME = 'devops2' // key pair name shown on your Jenkins/EC2 instance
     SSH_USER = 'ubuntu'
